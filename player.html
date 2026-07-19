@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Malle Hitster</title>
+<style>
+  :root {
+    --accent: #1DB954;
+    --dark: #121212;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--dark);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: white;
+  }
+  .wrap {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+  }
+  .logo {
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: var(--accent);
+    margin-bottom: 8px;
+    font-size: 15px;
+    text-transform: uppercase;
+  }
+  .card-number {
+    color: #888;
+    font-size: 13px;
+    margin-bottom: 32px;
+  }
+  .question-mark {
+    font-size: 90px;
+    margin-bottom: 24px;
+    line-height: 1;
+  }
+  .play-btn, .reveal-btn {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 999px;
+    padding: 18px 40px;
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(29,185,84,0.35);
+    width: 100%;
+    max-width: 320px;
+  }
+  .play-btn:active, .reveal-btn:active { transform: scale(0.97); }
+  .status {
+    margin-top: 24px;
+    color: #aaa;
+    font-size: 14px;
+    min-height: 20px;
+  }
+  #spotify-embed-container {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .hidden { display: none !important; }
+  .reveal-card {
+    background: #1e1e1e;
+    border-radius: 16px;
+    padding: 28px 20px;
+    width: 100%;
+    max-width: 320px;
+    margin-bottom: 20px;
+  }
+  .reveal-year {
+    font-size: 46px;
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+  .reveal-title {
+    font-size: 19px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .reveal-artist {
+    font-size: 15px;
+    color: #bbb;
+  }
+  .error {
+    color: #ff6b6b;
+    font-size: 14px;
+    max-width: 320px;
+  }
+  .controls-row {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    max-width: 320px;
+    margin-top: 12px;
+  }
+  .controls-row button {
+    flex: 1;
+  }
+  .secondary-btn {
+    background: transparent;
+    border: 1px solid #444;
+    color: #ccc;
+    border-radius: 999px;
+    padding: 14px 20px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="logo">Malle Hitster</div>
+  <div class="card-number" id="cardNumber"></div>
+
+  <div id="loadingState">
+    <div class="status">Lade Song …</div>
+  </div>
+
+  <div id="playState" class="hidden">
+    <div class="question-mark">🎵</div>
+    <button class="play-btn" id="playBtn">▶ Song abspielen</button>
+    <div class="status" id="playStatus"></div>
+  </div>
+
+  <div id="revealState" class="hidden">
+    <div class="reveal-card">
+      <div class="reveal-year" id="revYear"></div>
+      <div class="reveal-title" id="revTitle"></div>
+      <div class="reveal-artist" id="revArtist"></div>
+    </div>
+    <div class="controls-row">
+      <button class="secondary-btn" id="pauseBtn">⏸ Stopp</button>
+    </div>
+  </div>
+
+  <div id="errorState" class="hidden">
+    <div class="error" id="errorMsg"></div>
+  </div>
+
+  <!-- Spotify Embed wird hier unsichtbar reingebaut, steuert nur die Wiedergabe -->
+  <div id="spotify-embed-container"></div>
+
+  <div class="controls-row" id="revealRow" style="margin-top:32px;">
+    <button class="secondary-btn" id="revealBtn">🔎 Auflösen</button>
+  </div>
+</div>
+
+<script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const cardId = params.get('id');
+
+  const loadingState = document.getElementById('loadingState');
+  const playState = document.getElementById('playState');
+  const revealState = document.getElementById('revealState');
+  const errorState = document.getElementById('errorState');
+  const errorMsg = document.getElementById('errorMsg');
+  const cardNumberEl = document.getElementById('cardNumber');
+  const revealRow = document.getElementById('revealRow');
+
+  let songData = null;
+  let spotifyController = null;
+
+  function showError(msg) {
+    loadingState.classList.add('hidden');
+    playState.classList.add('hidden');
+    errorState.classList.remove('hidden');
+    errorMsg.textContent = msg;
+  }
+
+  if (!cardId) {
+    showError('Keine Karten-Nummer in der URL gefunden.');
+  } else {
+    cardNumberEl.textContent = '#' + cardId;
+    fetch('songs.json')
+      .then(r => {
+        if (!r.ok) throw new Error('songs.json nicht gefunden');
+        return r.json();
+      })
+      .then(data => {
+        songData = data[cardId];
+        if (!songData) {
+          showError('Song #' + cardId + ' nicht in songs.json gefunden.');
+          return;
+        }
+        loadingState.classList.add('hidden');
+        playState.classList.remove('hidden');
+        prepareController();
+      })
+      .catch(err => {
+        showError('Fehler beim Laden der Songliste: ' + err.message);
+      });
+  }
+
+  // Spotify iFrame API ist bereit
+  window.onSpotifyIframeApiReady = (IFrameAPI) => {
+    window.__spotifyIframeAPI = IFrameAPI;
+  };
+
+  function prepareController() {
+    const tryInit = () => {
+      if (!window.__spotifyIframeAPI) {
+        setTimeout(tryInit, 100);
+        return;
+      }
+      const element = document.getElementById('spotify-embed-container');
+      const options = {
+        uri: 'spotify:track:' + songData.spotify_id,
+        width: '1',
+        height: '1'
+      };
+      window.__spotifyIframeAPI.createController(element, options, (controller) => {
+        spotifyController = controller;
+      });
+    };
+    tryInit();
+  }
+
+  document.getElementById('playBtn').addEventListener('click', () => {
+    if (spotifyController) {
+      spotifyController.play();
+      document.getElementById('playStatus').textContent = '🔊 läuft … (Handy umdrehen!)';
+    } else {
+      // Controller noch nicht bereit (sehr langsame Verbindung) - sobald fertig, direkt abspielen
+      document.getElementById('playStatus').textContent = 'Lade Player …';
+      const waitAndPlay = setInterval(() => {
+        if (spotifyController) {
+          clearInterval(waitAndPlay);
+          spotifyController.play();
+          document.getElementById('playStatus').textContent = '🔊 läuft … (Handy umdrehen!)';
+        }
+      }, 100);
+    }
+  });
+
+  document.getElementById('pauseBtn').addEventListener('click', () => {
+    if (spotifyController) spotifyController.pause();
+  });
+
+  document.getElementById('revealBtn').addEventListener('click', () => {
+    if (!songData) return;
+    document.getElementById('revYear').textContent = songData.year;
+    document.getElementById('revTitle').textContent = songData.title;
+    document.getElementById('revArtist').textContent = songData.artist;
+    playState.classList.add('hidden');
+    revealState.classList.remove('hidden');
+    revealRow.classList.add('hidden');
+  });
+</script>
+</body>
+</html>
